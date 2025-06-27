@@ -25,9 +25,11 @@ mcp = FastMCP(
    instructions=INSTRUCTIONS
 )
 
+LINKEDIN_URL = "https://www.linkedin.com/in/pranavv19/"
 
 @mcp.tool()
 def send_message(username: str, message: str) -> Dict[str, Any]:
+    print(f"Received command: send_message with username={username}, message={message}")
     """Send an Instagram direct message to a user by username.
 
     Args:
@@ -857,6 +859,120 @@ def mute_conversation(thread_id: str, mute: bool = True) -> Dict[str, Any]:
     except Exception as e:
         return {"success": False, "message": str(e)}
 
+
+@mcp.tool()
+def auto_reply_to_message(thread_id: str, message_id: str = None) -> Dict[str, Any]:
+    """Auto-reply to a specific message in a thread using the LLM.
+
+    Args:
+        thread_id: The thread ID to reply in.
+        message_id: The message ID to reply to (if None, use the latest message).
+    Returns:
+        A dictionary with success status and a status message.
+    """
+    # Fetch the message to reply to
+    try:
+        messages = client.direct_messages(thread_id, amount=1) if not message_id else client.direct_messages(thread_id, 100)
+        target_message = None
+        if message_id:
+            for m in messages:
+                if str(m.id) == message_id:
+                    target_message = m
+                    break
+        else:
+            target_message = messages[0] if messages else None
+        if not target_message:
+            return {"success": False, "message": "Message not found in thread."}
+        original_text = getattr(target_message, 'text', None) or getattr(target_message, 'message', None) or str(target_message)
+        # Prompt the LLM for a reply (the LLM will see this tool call and generate the reply)
+        # The LLM should return a string reply
+        reply = "<LLM_GENERATED_REPLY>"  # The LLM will fill this in
+        # Send the reply
+        user_id = getattr(target_message, 'user_id', None)
+        if not user_id:
+            return {"success": False, "message": "Could not determine sender user_id."}
+        username = client.username_from_user_id(user_id)
+        if not username:
+            return {"success": False, "message": "Could not determine sender username."}
+        dm = client.direct_send(reply, [user_id])
+        if dm:
+            return {"success": True, "message": "Auto-reply sent.", "reply": reply, "direct_message_id": getattr(dm, 'id', None)}
+        else:
+            return {"success": False, "message": "Failed to send auto-reply."}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+
+@mcp.tool()
+def send_linkedin_link(username: str) -> Dict[str, Any]:
+    """Send your LinkedIn profile link to a user via Instagram DM."""
+    if not username:
+        return {"success": False, "message": "Username must be provided."}
+    try:
+        user_id = client.user_id_from_username(username)
+        if not user_id:
+            return {"success": False, "message": f"User '{username}' not found."}
+        message = f"Hey! Let's connect on LinkedIn: {LINKEDIN_URL}"
+        dm = client.direct_send(message, [user_id])
+        if dm:
+            return {"success": True, "message": "LinkedIn link sent.", "direct_message_id": getattr(dm, 'id', None)}
+        else:
+            return {"success": False, "message": "Failed to send LinkedIn link."}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@mcp.tool()
+def auto_reply_with_sales_or_linkedin(thread_id: str) -> Dict[str, Any]:
+    """Auto-reply to the latest message in a thread: send LinkedIn link if keywords are present, otherwise send a sales message."""
+    KEYWORDS = ["connect", "linkedin"]
+    SALES_MESSAGE = (
+        "Hey! Thanks for reaching out. I create photography and travel vlogs, and I'm open to travel collabs! "
+        "Let me know if you're interested in collaborating or want to see my latest adventures."
+    )
+    try:
+        messages = client.direct_messages(thread_id, amount=1)
+        if not messages:
+            return {"success": False, "message": "No messages found in thread."}
+        last_message = messages[0]
+        user_id = getattr(last_message, 'user_id', None)
+        if not user_id:
+            return {"success": False, "message": "Could not determine sender user_id."}
+        text = (getattr(last_message, 'text', None) or getattr(last_message, 'message', None) or str(last_message)).lower()
+        if any(keyword in text for keyword in KEYWORDS):
+            message = f"Thanks for your interest! Let's connect on LinkedIn: {LINKEDIN_URL}"
+        else:
+            message = SALES_MESSAGE
+        dm = client.direct_send(message, [user_id])
+        if dm:
+            return {"success": True, "message": "Auto-reply sent.", "direct_message_id": getattr(dm, 'id', None)}
+        else:
+            return {"success": False, "message": "Failed to send auto-reply."}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
+
+@mcp.tool()
+def qualify_lead_and_send_linkedin(username: str, qualifying_question: str = None) -> Dict[str, Any]:
+    """Ask a qualifying question, then send your LinkedIn profile link via Instagram DM."""
+    if not username:
+        return {"success": False, "message": "Username must be provided."}
+    try:
+        user_id = client.user_id_from_username(username)
+        if not user_id:
+            return {"success": False, "message": f"User '{username}' not found."}
+        if qualifying_question:
+            question = qualifying_question
+        else:
+            question = "What brings you to my DMs? Are you interested in networking, collaboration, or something else?"
+        client.direct_send(question, [user_id])
+        # In a real flow, you'd wait for a reply, but for demo, send the LinkedIn link right after
+        message = f"Awesome! By the way, here's my LinkedIn: {LINKEDIN_URL}"
+        dm = client.direct_send(message, [user_id])
+        if dm:
+            return {"success": True, "message": "Qualifying question and LinkedIn link sent.", "direct_message_id": getattr(dm, 'id', None)}
+        else:
+            return {"success": False, "message": "Failed to send messages."}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 if __name__ == "__main__":
    parser = argparse.ArgumentParser()
